@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { useAuth } from '../../context/AuthContext'
 
 const links = [
   { to: '/find-blood', label: 'Find Blood' },
@@ -18,6 +19,14 @@ const languages = [
 export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [lang, setLang] = useState('en')
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+
+  const handleLogout = () => {
+    logout()
+    setMenuOpen(false)
+    navigate('/')
+  }
 
   const linkClass = ({ isActive }) =>
     isActive
@@ -71,12 +80,33 @@ export default function Navbar() {
             ))}
           </div>
 
-          <Link
-            to="/login"
-            className="font-label-md text-label-md text-on-surface px-space-md py-space-xs rounded-full border border-outline hover:bg-surface-container-low transition-all"
-          >
-            Login
-          </Link>
+          {user ? (
+            <>
+              <Link
+                to={`/${user.role}/dashboard`}
+                className="hidden sm:flex items-center gap-2 font-label-md text-label-md text-on-surface hover:text-primary transition-colors"
+              >
+                <span className="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center font-headline-sm text-sm">
+                  {(user.name || 'U').charAt(0).toUpperCase()}
+                </span>
+                <span>{user.name}</span>
+              </Link>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="font-label-md text-label-md text-on-surface px-space-md py-space-xs rounded-full border border-outline hover:bg-surface-container-low transition-all cursor-pointer"
+              >
+                Logout
+              </button>
+            </>
+          ) : (
+            <Link
+              to="/login"
+              className="font-label-md text-label-md text-on-surface px-space-md py-space-xs rounded-full border border-outline hover:bg-surface-container-low transition-all"
+            >
+              Login
+            </Link>
+          )}
 
           <Link
             to="/request-blood"
@@ -112,6 +142,15 @@ export default function Navbar() {
               {l.label}
             </NavLink>
           ))}
+          {user && (
+            <Link
+              to={`/${user.role}/dashboard`}
+              onClick={() => setMenuOpen(false)}
+              className="font-label-md text-label-md text-primary py-space-sm"
+            >
+              My Dashboard
+            </Link>
+          )}
           <Link
             to="/request-blood"
             onClick={() => setMenuOpen(false)}
