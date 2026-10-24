@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '../../context/AuthContext'
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']
 
@@ -7,6 +8,7 @@ export default function Hero() {
   const [group, setGroup] = useState('ALL')
   const [location, setLocation] = useState('')
   const navigate = useNavigate()
+  const { user } = useAuth()
 
   const handleSearch = (e) => {
     e.preventDefault()
@@ -128,13 +130,17 @@ export default function Hero() {
               </span>
               <span>Request Blood</span>
             </Link>
-            <Link
-              to="/register/donor"
-              className="inline-flex items-center gap-2 bg-surface-container-lowest text-on-surface hover:bg-surface-container-low px-7 py-3.5 rounded-xl font-label-md text-label-md shadow-sm transition-all"
-            >
-              <span className="material-symbols-outlined text-xl text-primary">volunteer_activism</span>
-              <span>Become a Donor</span>
-            </Link>
+
+            {/* Only shown to visitors who are not signed in */}
+            {!user && (
+              <Link
+                to="/register/donor"
+                className="inline-flex items-center gap-2 bg-surface-container-lowest text-on-surface hover:bg-surface-container-low px-7 py-3.5 rounded-xl font-label-md text-label-md shadow-sm transition-all"
+              >
+                <span className="material-symbols-outlined text-xl text-primary">volunteer_activism</span>
+                <span>Become a Donor</span>
+              </Link>
+            )}
           </div>
         </div>
 
