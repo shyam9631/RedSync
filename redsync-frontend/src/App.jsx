@@ -12,6 +12,7 @@ import HospitalLogin from './pages/auth/HospitalLogin'
 import DonorRegister from './pages/auth/DonorRegister'
 import HospitalRegister from './pages/auth/HospitalRegister'
 import DonorDashboard from './pages/donor/DonorDashboard'
+import HospitalDashboard from './pages/hospital/HospitalDashboard'
 
 export default function App() {
   return (
@@ -36,12 +37,17 @@ export default function App() {
         </Route>
       </Route>
 
-      {/* Public pages and hospital pages (hospital dashboard comes next) */}
+      {/* Hospital pages: hospital dashboard navbar */}
+      <Route element={<ProtectedRoute role="hospital" />}>
+        <Route element={<DashboardLayout role="hospital" />}>
+          <Route path="/hospital/dashboard" element={<HospitalDashboard />} />
+          <Route path="/hospital/*" element={<ComingSoon />} />
+        </Route>
+      </Route>
+
+      {/* Public pages */}
       <Route element={<Layout />}>
         <Route path="/home" element={<Home />} />
-        <Route element={<ProtectedRoute role="hospital" />}>
-          <Route path="/hospital/dashboard" element={<Home />} />
-        </Route>
         <Route path="*" element={<ComingSoon />} />
       </Route>
     </Routes>
