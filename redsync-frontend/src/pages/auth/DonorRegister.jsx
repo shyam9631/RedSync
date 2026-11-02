@@ -230,14 +230,18 @@ export default function DonorRegister() {
     }
     if (s === 4) {
       if (!form.neverDonated) {
-        if (!form.lastDonation)
+        if (!form.lastDonation) {
           e.lastDonation = 'Enter your last donation date, or tick "I have never donated".'
-        else if (new Date(form.lastDonation) > new Date())
+        } else if (new Date(form.lastDonation) > new Date()) {
           e.lastDonation = 'The date cannot be in the future.'
+        }
       }
-      if (healthQuestions.some((q) => form[q.key] === null))
-        e.health = 'Please answer all three health questions.'
-      if (!form.sms && !form.whatsapp) e.alerts = 'Choose at least one alert channel.'
+
+      const unansweredHealth = healthQuestions.filter((q) => form[q.key] === null || form[q.key] === undefined)
+      if (unansweredHealth.length > 0) e.health = 'Please answer all three health questions.'
+
+      const hasAlertChannel = Boolean(form.sms) || Boolean(form.whatsapp)
+      if (!hasAlertChannel) e.alerts = 'Choose at least one alert channel.'
     }
     return e
   }
@@ -253,12 +257,20 @@ export default function DonorRegister() {
     if (Object.keys(e).length) return
     if (step < 4) return goTo(step + 1)
 
+    const otpCode = otp.join('').trim()
+    if (otpCode.length !== 6) {
+      setErrors((prev) => ({ ...prev, otp: 'Enter the 6-digit OTP code.' }))
+      return
+    }
+
     try {
       setIsSubmitting(true)
+      setErrors((prev) => ({ ...prev, submit: undefined }))
+
       const payload = {
         full_name: form.fullName.trim(),
         phone: form.phone,
-        otp: otp.join(''),
+        otp: otpCode,
         email: form.email || null,
         agree: form.agree,
         dob: form.dob,
@@ -271,12 +283,12 @@ export default function DonorRegister() {
         radius_km: Number(form.radius),
         last_donation: form.neverDonated || !form.lastDonation ? null : form.lastDonation,
         never_donated: form.neverDonated,
-        health_well_today: form.wellToday,
-        health_recent_illness: form.recentIllness,
-        health_antibiotics: form.antibiotics,
+        health_well_today: Boolean(form.wellToday),
+        health_recent_illness: Boolean(form.recentIllness),
+        health_antibiotics: Boolean(form.antibiotics),
         preferred_hospital_id: form.hospital ? Number(form.hospital) : null,
-        sms_alerts: form.sms,
-        whatsapp_alerts: form.whatsapp,
+        sms_alerts: Boolean(form.sms),
+        whatsapp_alerts: Boolean(form.whatsapp),
       }
 
       const { data } = await api.post('/auth/donor/register', payload)
@@ -284,7 +296,10 @@ export default function DonorRegister() {
       setDone(true)
       navigate('/donor/dashboard')
     } catch (err) {
-      setErrors((e) => ({ ...e, submit: err?.response?.data?.detail || 'Registration failed. Please try again.' }))
+      setErrors((prev) => ({
+        ...prev,
+        submit: err?.response?.data?.detail || 'Registration failed. Please try again.',
+      }))
     } finally {
       setIsSubmitting(false)
     }
