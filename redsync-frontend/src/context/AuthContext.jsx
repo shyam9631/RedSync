@@ -1,34 +1,34 @@
 import { createContext, useContext, useState } from 'react'
+import { clearSession, getStoredSession, storeSession } from '../lib/api'
 
 const AuthContext = createContext(null)
 
 function loadUser() {
-  try {
-    return JSON.parse(localStorage.getItem('redsync_user'))
-  } catch {
-    return null
-  }
+  const session = getStoredSession()
+  return session?.user || null
 }
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(loadUser)
 
-  const login = (userData) => {
-    setUser(userData)
+  const login = (sessionOrUser) => {
+    const session = sessionOrUser?.user ? sessionOrUser : { token: sessionOrUser?.token || null, user: sessionOrUser }
+    const nextUser = session.user || null
+
+    setUser(nextUser)
+
     try {
-      localStorage.setItem('redsync_user', JSON.stringify(userData))
+      localStorage.setItem('redsync_user', JSON.stringify(nextUser))
     } catch {
       /* ignore storage errors */
     }
+
+    storeSession(session)
   }
 
   const logout = () => {
     setUser(null)
-    try {
-      localStorage.removeItem('redsync_user')
-    } catch {
-      /* ignore storage errors */
-    }
+    clearSession()
   }
 
   return (
@@ -39,5 +39,9 @@ export function AuthProvider({ children }) {
 }
 
 export function useAuth() {
-  return useContext(AuthContext)
+  const context = useContext(AuthContext)
+  if (!context) {
+    return { user: null, login: () => {}, logout: () => {} }
+  }
+  return context
 }

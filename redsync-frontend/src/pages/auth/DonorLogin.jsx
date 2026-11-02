@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import api from '../../lib/api'
 
 const eligibility = [
   'Age 18–65',
@@ -14,6 +15,8 @@ export default function DonorLogin() {
   const [otpSent, setOtpSent] = useState(false)
   const [seconds, setSeconds] = useState(0)
   const [error, setError] = useState('')
+  const [isSending, setIsSending] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const inputsRef = useRef([])
   const { login } = useAuth()
   const navigate = useNavigate()
@@ -25,16 +28,25 @@ export default function DonorLogin() {
     return () => clearTimeout(t)
   }, [seconds])
 
-  const sendOtp = () => {
-    if (phone.length !== 10) {
+  const sendOtp = async () => {
+    if (!/^[6-9]\d{9}$/.test(phone)) {
       setError('Enter a valid 10-digit mobile number.')
       return
     }
-    setError('')
-    setOtp(['', '', '', '', '', ''])
-    setOtpSent(true)
-    setSeconds(45)
-    setTimeout(() => inputsRef.current[0]?.focus(), 0)
+
+    try {
+      setIsSending(true)
+      setError('')
+      await api.post('/auth/send-otp', { phone, purpose: 'login' })
+      setOtp(['', '', '', '', '', ''])
+      setOtpSent(true)
+      setSeconds(45)
+      setTimeout(() => inputsRef.current[0]?.focus(), 0)
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Unable to send OTP right now.')
+    } finally {
+      setIsSending(false)
+    }
   }
 
   const handleOtpChange = (i, value) => {
@@ -61,16 +73,26 @@ export default function DonorLogin() {
     inputsRef.current[Math.min(digits.length, 5)]?.focus()
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!otpSent) return sendOtp()
     if (otp.join('').length !== 6) {
       setError('Enter the 6-digit code.')
       return
     }
-    // Demo login: replaced by the real backend call later
-    login({ role: 'donor', name: 'Donor', phone })
-    navigate('/donor/dashboard')
+
+    try {
+      setIsSubmitting(true)
+      setError('')
+      const code = otp.join('')
+      const { data } = await api.post('/auth/donor/login', { phone, otp: code })
+      login({ token: data.access_token, user: data.user })
+      navigate('/donor/dashboard')
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Login failed. Please try again.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const timerText = `00:${String(seconds).padStart(2, '0')}`
@@ -132,9 +154,10 @@ export default function DonorLogin() {
                   <button
                     type="button"
                     onClick={sendOtp}
-                    className="px-4 font-label-md text-label-md text-primary hover:bg-primary-fixed/50 transition-colors cursor-pointer"
+                    disabled={isSending}
+                    className="px-4 font-label-md text-label-md text-primary hover:bg-primary-fixed/50 transition-colors cursor-pointer disabled:opacity-60"
                   >
-                    {otpSent ? 'Resend' : 'Send OTP'}
+                    {isSending ? 'Sending...' : otpSent ? 'Resend' : 'Send OTP'}
                   </button>
                 </div>
               </div>
@@ -200,18 +223,14 @@ export default function DonorLogin() {
                 </div>
               </div>
 
-              {otpSent && (
-                <p className="font-body-sm text-body-sm text-secondary">
-                  Demo mode: any 6-digit code works until the backend is connected.
-                </p>
-              )}
               {error && <p className="font-body-md text-body-md text-error">{error}</p>}
 
               <button
                 type="submit"
-                className="w-full py-4 px-6 rounded-full bg-primary-container hover:bg-primary text-on-primary font-title-md text-title-md font-semibold tracking-wide shadow-lg shadow-primary-container/25 transition-all transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2 group cursor-pointer"
+                disabled={isSubmitting}
+                className="w-full py-4 px-6 rounded-full bg-primary-container hover:bg-primary text-on-primary font-title-md text-title-md font-semibold tracking-wide shadow-lg shadow-primary-container/25 transition-all transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2 group cursor-pointer disabled:opacity-70"
               >
-                <span>{otpSent ? 'Verify & Sign In as Donor' : 'Send OTP'}</span>
+                <span>{isSubmitting ? 'Signing in...' : otpSent ? 'Verify & Sign In as Donor' : 'Send OTP'}</span>
                 <span className="material-symbols-outlined text-xl transition-transform group-hover:translate-x-1">
                   arrow_forward
                 </span>

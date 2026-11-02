@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { Field, ErrorText, inputClass } from '../../components/forms/FormBits'
+import api, { clearSession } from '../../lib/api'
 
 const stepTitles = [
   '1. Account Information',
@@ -13,13 +14,6 @@ const stepLabels = ['Account', 'Personal', 'Location', 'Preferences']
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']
 const genders = ['Male', 'Female', 'Other']
 const radii = [5, 10, 15, 25]
-
-// Sample names only. Real hospitals will come from the backend.
-const sampleHospitals = [
-  'City General Hospital (sample)',
-  'Lifeline Blood Bank (sample)',
-  'Community Care Hospital (sample)',
-]
 
 const healthQuestions = [
   { key: 'wellToday', label: 'Feeling well today?' },
@@ -100,9 +94,31 @@ export default function DonorRegister() {
   const [otpSent, setOtpSent] = useState(false)
   const [locMsg, setLocMsg] = useState('')
   const [done, setDone] = useState(false)
+  const [isSendingOtp, setIsSendingOtp] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [hospitals, setHospitals] = useState([])
   const inputsRef = useRef([])
   const { login } = useAuth()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    clearSession()
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    api
+      .get('/public/hospitals')
+      .then(({ data }) => {
+        if (active) setHospitals(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {
+        if (active) setHospitals([])
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const today = new Date().toISOString().split('T')[0]
 
@@ -117,20 +133,29 @@ export default function DonorRegister() {
   }
 
   // ---------- OTP ----------
-  const sendOtp = () => {
+  const sendOtp = async () => {
     if (!/^[6-9]\d{9}$/.test(form.phone)) {
       setErrors((e) => ({ ...e, phone: 'Enter a valid 10-digit mobile number.' }))
       return
     }
-    setErrors((e) => {
-      const next = { ...e }
-      delete next.phone
-      delete next.otp
-      return next
-    })
-    setOtp(['', '', '', '', '', ''])
-    setOtpSent(true)
-    setTimeout(() => inputsRef.current[0]?.focus(), 0)
+
+    try {
+      setIsSendingOtp(true)
+      setErrors((e) => {
+        const next = { ...e }
+        delete next.phone
+        delete next.otp
+        return next
+      })
+      await api.post('/auth/send-otp', { phone: form.phone, purpose: 'register' })
+      setOtp(['', '', '', '', '', ''])
+      setOtpSent(true)
+      setTimeout(() => inputsRef.current[0]?.focus(), 0)
+    } catch (err) {
+      setErrors((e) => ({ ...e, otp: err?.response?.data?.detail || 'Unable to send OTP right now.' }))
+    } finally {
+      setIsSendingOtp(false)
+    }
   }
 
   const handleOtpChange = (i, value) => {
@@ -222,19 +247,47 @@ export default function DonorRegister() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const next = () => {
+  const next = async () => {
     const e = validate(step)
     setErrors(e)
     if (Object.keys(e).length) return
     if (step < 4) return goTo(step + 1)
 
-    // Demo registration: nothing is saved yet. The backend call goes here later.
-    login({
-      role: 'donor',
-      name: form.fullName.trim().split(' ')[0],
-      phone: form.phone,
-    })
-    setDone(true)
+    try {
+      setIsSubmitting(true)
+      const payload = {
+        full_name: form.fullName.trim(),
+        phone: form.phone,
+        otp: otp.join(''),
+        email: form.email || null,
+        agree: form.agree,
+        dob: form.dob,
+        gender: form.gender,
+        weight_kg: Number(form.weight),
+        blood_group: form.bloodGroup,
+        city: form.city.trim(),
+        area: form.area.trim(),
+        pin: form.pin,
+        radius_km: Number(form.radius),
+        last_donation: form.neverDonated || !form.lastDonation ? null : form.lastDonation,
+        never_donated: form.neverDonated,
+        health_well_today: form.wellToday,
+        health_recent_illness: form.recentIllness,
+        health_antibiotics: form.antibiotics,
+        preferred_hospital_id: form.hospital ? Number(form.hospital) : null,
+        sms_alerts: form.sms,
+        whatsapp_alerts: form.whatsapp,
+      }
+
+      const { data } = await api.post('/auth/donor/register', payload)
+      login({ token: data.access_token, user: data.user })
+      setDone(true)
+      navigate('/donor/dashboard')
+    } catch (err) {
+      setErrors((e) => ({ ...e, submit: err?.response?.data?.detail || 'Registration failed. Please try again.' }))
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const back = () => {
@@ -389,11 +442,6 @@ export default function DonorRegister() {
                         />
                       ))}
                     </div>
-                    {otpSent && (
-                      <p className="font-body-sm text-body-sm text-secondary mt-2">
-                        Demo mode: any 6-digit code works until the backend is connected.
-                      </p>
-                    )}
                     <ErrorText>{errors.otp}</ErrorText>
                   </div>
 
@@ -656,9 +704,9 @@ export default function DonorRegister() {
                       className={inputClass(false)}
                     >
                       <option value="">Select preferred hospital or blood bank</option>
-                      {sampleHospitals.map((h) => (
-                        <option key={h} value={h}>
-                          {h}
+                      {hospitals.map((h) => (
+                        <option key={h.id} value={String(h.id)}>
+                          {h.name} ({h.city})
                         </option>
                       ))}
                     </select>
