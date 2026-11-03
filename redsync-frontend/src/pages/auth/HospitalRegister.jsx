@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import api, { errorMessage } from '../../lib/api'
 import { Field, ErrorText, PhoneInput, inputClass } from '../../components/forms/FormBits'
 
 const steps = ['Facility', 'Location & Contact', 'Blood Services', 'Staff Account']
@@ -76,6 +77,8 @@ export default function HospitalRegister() {
   const [errors, setErrors] = useState({})
   const [showPwd, setShowPwd] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [notice, setNotice] = useState('')
   const fileRef = useRef(null)
 
   const currentYear = new Date().getFullYear()
@@ -175,15 +178,62 @@ export default function HospitalRegister() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const next = () => {
+  const next = async () => {
     const e = validate(step)
     setErrors(e)
     if (Object.keys(e).length) return
     if (step < 4) return goTo(step + 1)
 
-    // Demo submission: nothing is saved yet. The backend call goes here later.
-    setSubmitted(true)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    try {
+      setIsSubmitting(true)
+      setErrors((prev) => ({ ...prev, submit: undefined }))
+      const staffEmail = form.staffEmail.trim().toLowerCase()
+
+      await api.post('/auth/hospital/register', {
+        name: form.name.trim(),
+        facility_type: form.type,
+        reg_number: form.regNumber.trim(),
+        year_established: form.year ? Number(form.year) : null,
+        address: form.address.trim(),
+        city: form.city.trim(),
+        state: form.state.trim(),
+        pin: form.pin,
+        phone: form.phone,
+        emergency_phone: form.emergencyPhone,
+        email: form.email.trim(),
+        website: form.website.trim() || null,
+        components: form.components,
+        open_24h: form.open24,
+        open_time: form.open24 ? null : form.openTime,
+        close_time: form.open24 ? null : form.closeTime,
+        contact_name: form.contactName.trim(),
+        contact_mobile: form.staffMobile,
+        staff_email: staffEmail,
+        password: form.password,
+        authorized: form.authorized,
+      })
+
+      // The application is saved. Now attach the license (the API checks it with the same login).
+      try {
+        const body = new FormData()
+        body.append('email', staffEmail)
+        body.append('password', form.password)
+        body.append('file', file)
+        // Let the browser set the multipart boundary itself
+        await api.post('/public/hospital-license', body, { headers: { 'Content-Type': undefined } })
+      } catch (uploadErr) {
+        setNotice(
+          `Your application was saved, but the license upload failed: ${errorMessage(uploadErr, 'please try again later')}.`
+        )
+      }
+
+      setSubmitted(true)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } catch (err) {
+      setErrors((prev) => ({ ...prev, submit: errorMessage(err, 'Registration failed. Please try again.') }))
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const back = () => {
@@ -237,6 +287,7 @@ export default function HospitalRegister() {
                 We will review your details and email you once your account is approved. Your
                 facility code will be sent with the approval.
               </p>
+              {notice && <p className="text-error font-body-md text-body-md mb-6 max-w-lg">{notice}</p>}
               <div className="flex flex-col sm:flex-row items-center gap-4 w-full justify-center max-w-md">
                 <Link
                   to="/"
@@ -790,6 +841,11 @@ export default function HospitalRegister() {
                 )}
 
                 {/* Buttons */}
+                {errors.submit && (
+                  <p role="alert" className="pt-4 font-body-md text-body-md text-error">
+                    {errors.submit}
+                  </p>
+                )}
                 <div className="pt-6 flex items-center justify-between">
                   <button
                     type="button"
@@ -801,9 +857,10 @@ export default function HospitalRegister() {
                   </button>
                   <button
                     type="submit"
-                    className="rounded-full px-8 py-3.5 bg-primary-container hover:bg-primary text-on-primary font-label-md text-label-md transition-transform hover:-translate-y-0.5 shadow-sm cursor-pointer"
+                    disabled={isSubmitting}
+                    className="rounded-full px-8 py-3.5 bg-primary-container hover:bg-primary text-on-primary font-label-md text-label-md transition-transform hover:-translate-y-0.5 shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    {step === 4 ? 'Submit Application' : 'Continue'}
+                    {step === 4 ? (isSubmitting ? 'Submitting…' : 'Submit Application') : 'Continue'}
                   </button>
                 </div>
               </form>

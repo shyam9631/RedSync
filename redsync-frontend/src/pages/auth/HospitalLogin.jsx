@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import api, { errorMessage } from '../../lib/api'
 
 const features = [
   'Update blood stock for each blood group',
@@ -14,23 +15,31 @@ export default function HospitalLogin() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!facilityCode.trim() || !email.trim() || !password) {
       setError('Enter your facility code, staff email and password.')
       return
     }
-    // Demo login: replaced by the real backend call later
-    login({
-      role: 'hospital',
-      name: 'Hospital',
-      email,
-      facilityCode: facilityCode.trim(),
-    })
-    navigate('/hospital/dashboard')
+    try {
+      setIsSubmitting(true)
+      setError('')
+      const { data } = await api.post('/auth/hospital/login', {
+        facility_code: facilityCode.trim(),
+        email: email.trim(),
+        password,
+      })
+      login({ token: data.access_token, user: data.user })
+      navigate('/hospital/dashboard')
+    } catch (err) {
+      setError(errorMessage(err, 'Login failed. Please try again.'))
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const fieldBox =
@@ -153,7 +162,8 @@ export default function HospitalLogin() {
 
             <button
               type="submit"
-              className="mt-2 w-full h-12 bg-primary hover:bg-surface-tint text-on-primary font-headline-sm text-body-lg rounded-full flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all transform active:scale-[0.99] cursor-pointer"
+              disabled={isSubmitting}
+              className="mt-2 w-full h-12 disabled:opacity-60 disabled:cursor-not-allowed bg-primary hover:bg-surface-tint text-on-primary font-headline-sm text-body-lg rounded-full flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all transform active:scale-[0.99] cursor-pointer"
             >
               <span
                 className="material-symbols-outlined text-[20px]"
@@ -161,7 +171,7 @@ export default function HospitalLogin() {
               >
                 lock
               </span>
-              <span>Access Dashboard</span>
+              <span>{isSubmitting ? 'Signing in…' : 'Access Dashboard'}</span>
               <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
             </button>
 

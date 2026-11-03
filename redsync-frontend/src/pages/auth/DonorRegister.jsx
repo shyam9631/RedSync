@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { Field, ErrorText, inputClass } from '../../components/forms/FormBits'
-import api, { clearSession } from '../../lib/api'
+import api, { clearSession, errorMessage } from '../../lib/api'
 
 const stepTitles = [
   '1. Account Information',
@@ -147,12 +147,13 @@ export default function DonorRegister() {
         delete next.otp
         return next
       })
-      await api.post('/auth/send-otp', { phone: form.phone, purpose: 'register' })
-      setOtp(['', '', '', '', '', ''])
+      const { data } = await api.post('/auth/send-otp', { phone: form.phone, purpose: 'register' })
+      // There is no SMS service yet. In dev mode the API returns the code, so fill it in.
+      setOtp(data?.dev_otp ? data.dev_otp.split('') : ['', '', '', '', '', ''])
       setOtpSent(true)
       setTimeout(() => inputsRef.current[0]?.focus(), 0)
     } catch (err) {
-      setErrors((e) => ({ ...e, otp: err?.response?.data?.detail || 'Unable to send OTP right now.' }))
+      setErrors((e) => ({ ...e, otp: errorMessage(err, 'Unable to send OTP right now.') }))
     } finally {
       setIsSendingOtp(false)
     }
@@ -298,7 +299,7 @@ export default function DonorRegister() {
     } catch (err) {
       setErrors((prev) => ({
         ...prev,
-        submit: err?.response?.data?.detail || 'Registration failed. Please try again.',
+        submit: errorMessage(err, 'Registration failed. Please try again.'),
       }))
     } finally {
       setIsSubmitting(false)
@@ -768,6 +769,11 @@ export default function DonorRegister() {
               )}
 
               {/* Footer buttons */}
+              {errors.submit && (
+                <p role="alert" className="mb-4 font-body-md text-body-md text-error">
+                  {errors.submit}
+                </p>
+              )}
               <div className="pt-space-lg mt-space-lg flex items-center justify-between">
                 {step > 1 ? (
                   <button
@@ -782,9 +788,10 @@ export default function DonorRegister() {
                 )}
                 <button
                   type="submit"
-                  className="px-8 py-3 rounded-full bg-primary-container text-on-primary font-label-md text-label-md font-semibold hover:bg-primary transition-all shadow-sm cursor-pointer"
+                  disabled={isSubmitting}
+                  className="px-8 py-3 rounded-full bg-primary-container text-on-primary font-label-md text-label-md font-semibold hover:bg-primary transition-all shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {step === 4 ? 'Complete Registration' : 'Continue'}
+                  {step === 4 ? (isSubmitting ? 'Registering…' : 'Complete Registration') : 'Continue'}
                 </button>
               </div>
             </form>

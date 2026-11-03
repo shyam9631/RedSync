@@ -200,7 +200,7 @@ export default function HospitalDashboard() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-space-md mb-8">
         <div className="flex flex-wrap items-center gap-space-sm sm:gap-space-md">
           <h1 className="font-headline-lg text-headline-lg-mobile sm:text-headline-lg text-on-surface tracking-tight">
-            {SAMPLE_HOSPITAL.name}
+            {user?.hospitalName || SAMPLE_HOSPITAL.name}
           </h1>
           <span className="inline-flex items-center gap-1.5 px-3 py-1 font-mono text-label-sm text-secondary bg-surface-container rounded-full">
             <span className="w-2 h-2 rounded-full bg-tertiary"></span>

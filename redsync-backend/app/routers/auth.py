@@ -1,7 +1,8 @@
+import hmac
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import schemas
@@ -27,7 +28,20 @@ def _normalize_phone(phone: str) -> str:
     return digits
 
 
+MAX_OTP_ATTEMPTS = 5  # wrong guesses allowed per code
+MAX_OTPS_PER_10_MIN = 5  # codes that can be requested per phone number
+
+
 def _send_otp(db: Session, phone: str, purpose: str) -> str:
+    recent = db.scalar(
+        select(func.count(OtpCode.id)).where(
+            OtpCode.phone == phone,
+            OtpCode.created_at > utcnow() - timedelta(minutes=10),
+        )
+    ) or 0
+    if recent >= MAX_OTPS_PER_10_MIN:
+        raise HTTPException(429, "Too many OTP requests. Please wait a few minutes and try again.")
+
     otp = generate_otp()
     db.add(
         OtpCode(
@@ -53,7 +67,14 @@ def _validate_otp(db: Session, phone: str, otp: str, purpose: str) -> OtpCode:
         )
         .order_by(OtpCode.id.desc())
     )
-    if row is None or row.code_hash != hash_otp(phone, otp):
+    if row is None:
+        raise HTTPException(401, "This OTP has expired or was not requested. Please request a new one.")
+    if row.attempts >= MAX_OTP_ATTEMPTS:
+        raise HTTPException(429, "Too many wrong attempts. Please request a new OTP.")
+    if not hmac.compare_digest(row.code_hash, hash_otp(phone, otp)):
+        # Count the wrong guess. Without this a 6-digit code can be brute-forced.
+        row.attempts += 1
+        db.commit()
         raise HTTPException(401, "Incorrect OTP code.")
     row.used = True
     return row
@@ -157,7 +178,8 @@ def donor_login(body: schemas.DonorLoginIn, db: Session = Depends(get_db)):
 @router.post("/hospital/register", response_model=schemas.MessageOut)
 def hospital_register(body: schemas.HospitalRegisterIn, db: Session = Depends(get_db)):
     staff_email = body.staff_email.lower().strip()
-    if db.scalar(select(User.id).where(User.email == staff_email, User.role == "hospital")):
+    # users.email is unique across ALL roles, so check every role (a donor may use the same email)
+    if db.scalar(select(User.id).where(User.email == staff_email)):
         raise HTTPException(409, "This staff email is already in use.")
 
     reg_number = body.reg_number.strip()
@@ -167,7 +189,9 @@ def hospital_register(body: schemas.HospitalRegisterIn, db: Session = Depends(ge
     user = User(
         role="hospital",
         name=body.contact_name.strip(),
-        phone=body.contact_mobile,
+        # users.phone is unique across all roles and is the donor login key. The contact number
+        # is kept on the hospital row, so a hospital never blocks (or crashes on) a donor's number.
+        phone=None,
         email=staff_email,
         password_hash=hash_password(body.password),
         is_active=True,
@@ -206,7 +230,7 @@ def hospital_register(body: schemas.HospitalRegisterIn, db: Session = Depends(ge
 @router.post("/hospital/login", response_model=schemas.TokenOut)
 def hospital_login(body: schemas.HospitalLoginIn, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.email == body.email.lower().strip(), User.role == "hospital"))
-    if user is None or not user.password_hash or not user.hospital:
+    if user is None or not user.is_active or not user.password_hash or not user.hospital:
         raise HTTPException(401, "Incorrect email or password.")
     if not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "Incorrect email or password.")

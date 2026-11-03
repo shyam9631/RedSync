@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
-import api from '../../lib/api'
+import api, { errorMessage } from '../../lib/api'
 
 const eligibility = [
   'Age 18–65',
@@ -37,13 +37,14 @@ export default function DonorLogin() {
     try {
       setIsSending(true)
       setError('')
-      await api.post('/auth/send-otp', { phone, purpose: 'login' })
-      setOtp(['', '', '', '', '', ''])
+      const { data } = await api.post('/auth/send-otp', { phone, purpose: 'login' })
+      // There is no SMS service yet. In dev mode the API returns the code, so fill it in.
+      setOtp(data?.dev_otp ? data.dev_otp.split('') : ['', '', '', '', '', ''])
       setOtpSent(true)
       setSeconds(45)
       setTimeout(() => inputsRef.current[0]?.focus(), 0)
     } catch (err) {
-      setError(err?.response?.data?.detail || 'Unable to send OTP right now.')
+      setError(errorMessage(err, 'Unable to send OTP right now.'))
     } finally {
       setIsSending(false)
     }
@@ -89,7 +90,7 @@ export default function DonorLogin() {
       login({ token: data.access_token, user: data.user })
       navigate('/donor/dashboard')
     } catch (err) {
-      setError(err?.response?.data?.detail || 'Login failed. Please try again.')
+      setError(errorMessage(err, 'Login failed. Please try again.'))
     } finally {
       setIsSubmitting(false)
     }
