@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Modal from '../../components/ui/Modal'
 import { Field, ErrorText, inputClass } from '../../components/forms/FormBits'
+import { errorMessage } from '../../lib/api'
 import {
   ALL_GROUPS,
   COMPONENTS,
@@ -21,23 +22,54 @@ const STATUS_LABEL = { available: 'Available', low: 'Low', critical: 'Critical' 
 const selectClass =
   'w-full h-12 px-4 rounded-lg bg-surface-container-low text-on-surface focus:outline-none focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary-container font-body-md text-body-md'
 
-function Buttons({ onClose, saveLabel, saveIcon }) {
+// Runs the parent's async save. On success the parent closes the modal; on failure the
+// server's message is shown inside the modal and the form stays open.
+function useSave(onSave) {
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState('')
+
+  const run = async (payload) => {
+    setSaving(true)
+    setFormError('')
+    try {
+      await onSave(payload)
+    } catch (err) {
+      setFormError(errorMessage(err))
+      setSaving(false)
+    }
+  }
+  return { saving, formError, run }
+}
+
+function Buttons({ onClose, saveLabel, saveIcon, saving, formError }) {
   return (
-    <div className="flex items-center justify-end gap-3 pt-2">
-      <button
-        type="button"
-        onClick={onClose}
-        className="px-5 py-2.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md text-label-md transition-colors cursor-pointer"
-      >
-        Cancel
-      </button>
-      <button
-        type="submit"
-        className="px-6 py-2.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md shadow-sm transition-all flex items-center gap-2 cursor-pointer"
-      >
-        {saveIcon && <span className="material-symbols-outlined text-[18px]">{saveIcon}</span>}
-        <span>{saveLabel}</span>
-      </button>
+    <div className="space-y-3 pt-2">
+      {formError && (
+        <div
+          role="alert"
+          className="flex items-start gap-2.5 rounded-xl bg-error-container px-4 py-3 text-on-error-container"
+        >
+          <span className="material-symbols-outlined text-[20px] shrink-0">error</span>
+          <p className="font-body-sm text-body-sm">{formError}</p>
+        </div>
+      )}
+      <div className="flex items-center justify-end gap-3">
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-5 py-2.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md text-label-md transition-colors cursor-pointer"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={saving}
+          className="px-6 py-2.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {saveIcon && <span className="material-symbols-outlined text-[18px]">{saveIcon}</span>}
+          <span>{saving ? 'Saving…' : saveLabel}</span>
+        </button>
+      </div>
     </div>
   )
 }
@@ -46,8 +78,9 @@ function Buttons({ onClose, saveLabel, saveIcon }) {
 export function UpdateStockModal({ item, onSave, onClose }) {
   const [units, setUnits] = useState(String(item.units))
   const [expiry, setExpiry] = useState(item.expiry || '')
-  const [notes, setNotes] = useState('')
+  const [notes, setNotes] = useState(item.notes || '')
   const [errors, setErrors] = useState({})
+  const { saving, formError, run } = useSave(onSave)
 
   const today = localISO(new Date())
   const n = Number(units)
@@ -67,7 +100,7 @@ export function UpdateStockModal({ item, onSave, onClose }) {
     if (expiry && expiry < today) er.expiry = 'The expiry date cannot be in the past.'
     setErrors(er)
     if (Object.keys(er).length) return
-    onSave({ group: item.group, units: n, expiry, notes: notes.trim() })
+    run({ group: item.group, units: n, expiry, notes: notes.trim() })
   }
 
   return (
@@ -148,6 +181,7 @@ export function UpdateStockModal({ item, onSave, onClose }) {
           <textarea
             id="stock-notes"
             rows={2}
+            maxLength={300}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="e.g. batch number or storage unit"
@@ -155,7 +189,7 @@ export function UpdateStockModal({ item, onSave, onClose }) {
           />
         </Field>
 
-        <Buttons onClose={onClose} saveLabel="Save updates" />
+        <Buttons onClose={onClose} saveLabel="Save updates" saving={saving} formError={formError} />
       </form>
     </Modal>
   )
@@ -170,6 +204,7 @@ export function PostRequestModal({ onSave, onClose }) {
   const [requiredBy, setRequiredBy] = useState('')
   const [notes, setNotes] = useState('')
   const [errors, setErrors] = useState({})
+  const { saving, formError, run } = useSave(onSave)
 
   const clear = (key) => setErrors((e) => ({ ...e, [key]: undefined }))
 
@@ -183,7 +218,7 @@ export function PostRequestModal({ onSave, onClose }) {
     else if (new Date(requiredBy) <= new Date()) er.requiredBy = 'Choose a time in the future.'
     setErrors(er)
     if (Object.keys(er).length) return
-    onSave({
+    run({
       group,
       units: n,
       component,
@@ -202,7 +237,7 @@ export function PostRequestModal({ onSave, onClose }) {
   return (
     <Modal
       title="Post urgent blood request"
-      subtitle="Matching donors near your hospital will be notified."
+      subtitle="Matching donors in your city will be notified."
       leading={
         <div className="w-10 h-10 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0">
           <span className="material-symbols-outlined text-[20px]">emergency</span>
@@ -308,6 +343,7 @@ export function PostRequestModal({ onSave, onClose }) {
           <input
             id="req-notes"
             type="text"
+            maxLength={300}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="e.g. Emergency surgery. Do not add patient names."
@@ -317,43 +353,53 @@ export function PostRequestModal({ onSave, onClose }) {
 
         <div className="p-3 bg-surface-container-low rounded-xl flex items-center gap-2 font-body-sm text-body-sm text-secondary">
           <span className="material-symbols-outlined text-[18px] text-tertiary">info</span>
-          <span>Nearby donors with a matching blood group will be notified.</span>
+          <span>Available, eligible donors with a matching blood group will be notified.</span>
         </div>
 
-        <Buttons onClose={onClose} saveLabel="Post request" saveIcon="send" />
+        <Buttons
+          onClose={onClose}
+          saveLabel="Post request"
+          saveIcon="send"
+          saving={saving}
+          formError={formError}
+        />
       </form>
     </Modal>
   )
 }
 
 /* ---------------- Record a donation ---------------- */
-export function RecordDonationModal({ donors, onSave, onClose }) {
+// `initialDonorId` and `responseId` are set when the hospital records a donation straight
+// from a donor's response, so the response is closed as "completed" at the same time.
+export function RecordDonationModal({ donors, initialDonorId, responseId, onSave, onClose }) {
   const [query, setQuery] = useState('')
-  const [donorId, setDonorId] = useState('')
+  const [donorId, setDonorId] = useState(initialDonorId ? String(initialDonorId) : '')
   const [date, setDate] = useState(localISO(new Date()))
   const [component, setComponent] = useState(COMPONENTS[0])
   const [units, setUnits] = useState('1')
   const [batch, setBatch] = useState('')
   const [errors, setErrors] = useState({})
+  const { saving, formError, run } = useSave(onSave)
 
   const today = localISO(new Date())
   const clear = (key) => setErrors((e) => ({ ...e, [key]: undefined }))
+  const locked = Boolean(responseId)
 
   const q = query.trim().toLowerCase()
   const options = donors.filter(
     (d) => !q || d.name.toLowerCase().includes(q) || d.code.toLowerCase().includes(q)
   )
-  const donor = donors.find((d) => d.id === donorId)
+  const donor = donors.find((d) => String(d.id) === donorId)
 
   // Soft warning when this donation is sooner than the usual gap
   let warning = ''
-  if (donor && date && donor.lastDonation && !donor.neverDonated) {
+  if (donor && date && donor.last_donation && !donor.never_donated) {
     const gap = donor.gender === 'Female' ? 120 : 90
-    const next = parseLocal(donor.lastDonation)
+    const next = parseLocal(donor.last_donation)
     next.setDate(next.getDate() + gap)
     if (parseLocal(date) < next) {
       warning = `Their last recorded donation was on ${formatDate(
-        parseLocal(donor.lastDonation)
+        parseLocal(donor.last_donation)
       )}. The usual gap is ${gap} days, so check before saving.`
     }
   }
@@ -368,7 +414,14 @@ export function RecordDonationModal({ donors, onSave, onClose }) {
     if (!Number.isInteger(n) || n < 1 || n > 5) er.units = 'Enter between 1 and 5 units.'
     setErrors(er)
     if (Object.keys(er).length) return
-    onSave({ donorId, date, component, units: n, batch: batch.trim() })
+    run({
+      donorId: Number(donorId),
+      date,
+      component,
+      units: n,
+      batch: batch.trim(),
+      responseId: responseId || null,
+    })
   }
 
   return (
@@ -388,36 +441,39 @@ export function RecordDonationModal({ donors, onSave, onClose }) {
             htmlFor="donor-search"
             className="block font-label-md text-label-md text-on-surface mb-2"
           >
-            Search and pick a donor <span className="text-error">*</span>
+            {locked ? 'Donor' : 'Search and pick a donor'} <span className="text-error">*</span>
           </label>
-          <div className="relative mb-2">
-            <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[18px] text-secondary">
-              search
-            </span>
-            <input
-              id="donor-search"
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name or ID"
-              className="w-full pl-10 pr-4 py-2.5 bg-surface-container-low rounded-xl font-body-md text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
-            />
-          </div>
+          {!locked && (
+            <div className="relative mb-2">
+              <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[18px] text-secondary">
+                search
+              </span>
+              <input
+                id="donor-search"
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by name or ID"
+                className="w-full pl-10 pr-4 py-2.5 bg-surface-container-low rounded-xl font-body-md text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
+              />
+            </div>
+          )}
           <select
             aria-label="Donor"
             value={donorId}
+            disabled={locked}
             onChange={(e) => {
               setDonorId(e.target.value)
               clear('donor')
             }}
-            className={`${selectClass} ${errors.donor ? 'ring-2 ring-error' : ''}`}
+            className={`${selectClass} ${errors.donor ? 'ring-2 ring-error' : ''} disabled:opacity-70`}
           >
             <option value="">
               {options.length ? 'Select a donor' : 'No donors match your search'}
             </option>
             {options.map((d) => (
               <option key={d.id} value={d.id}>
-                {d.name} ({d.code}) • {d.group}
+                {d.name} ({d.code}) • {d.blood_group}
               </option>
             ))}
           </select>
@@ -472,6 +528,7 @@ export function RecordDonationModal({ donors, onSave, onClose }) {
             <input
               id="don-batch"
               type="text"
+              maxLength={50}
               value={batch}
               onChange={(e) => setBatch(e.target.value)}
               placeholder="e.g. BTC-0001"
@@ -489,10 +546,166 @@ export function RecordDonationModal({ donors, onSave, onClose }) {
 
         <div className="p-3 bg-surface-container-low rounded-xl flex items-center gap-2 font-body-sm text-body-sm text-secondary">
           <span className="material-symbols-outlined text-[18px] text-tertiary">check_circle</span>
-          <span>This updates the donor's next eligible date and your stock.</span>
+          <span>This updates the donor's next eligible date and adds the units to your stock.</span>
         </div>
 
-        <Buttons onClose={onClose} saveLabel="Save donation" saveIcon="save" />
+        <Buttons
+          onClose={onClose}
+          saveLabel="Save donation"
+          saveIcon="save"
+          saving={saving}
+          formError={formError}
+        />
+      </form>
+    </Modal>
+  )
+}
+
+/* ---------------- Create a donation camp ---------------- */
+export function CreateCampModal({ onSave, onClose }) {
+  const [title, setTitle] = useState('')
+  const [campDate, setCampDate] = useState('')
+  const [start, setStart] = useState('09:00')
+  const [end, setEnd] = useState('15:00')
+  const [venue, setVenue] = useState('')
+  const [target, setTarget] = useState('50')
+  const [errors, setErrors] = useState({})
+  const { saving, formError, run } = useSave(onSave)
+
+  const today = localISO(new Date())
+  const clear = (key) => setErrors((e) => ({ ...e, [key]: undefined }))
+
+  const submit = (e) => {
+    e.preventDefault()
+    const er = {}
+    const n = Number(target)
+    if (title.trim().length < 3) er.title = 'Enter a camp name (at least 3 characters).'
+    if (!campDate) er.campDate = 'Choose the camp date.'
+    else if (campDate < today) er.campDate = 'The camp date cannot be in the past.'
+    if (!start) er.start = 'Enter a start time.'
+    if (!end) er.end = 'Enter an end time.'
+    else if (start && end <= start) er.end = 'The end time must be after the start time.'
+    if (venue.trim().length < 3) er.venue = 'Enter the venue (at least 3 characters).'
+    if (!Number.isInteger(n) || n < 1 || n > 1000) er.target = 'Enter between 1 and 1000 units.'
+    setErrors(er)
+    if (Object.keys(er).length) return
+    run({
+      title: title.trim(),
+      campDate,
+      start,
+      end,
+      venue: venue.trim(),
+      target: n,
+    })
+  }
+
+  return (
+    <Modal
+      title="Create a donation camp"
+      subtitle="Donors in your city will see it and can register."
+      leading={
+        <div className="w-10 h-10 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0">
+          <span className="material-symbols-outlined text-[20px]">event</span>
+        </div>
+      }
+      onClose={onClose}
+    >
+      <form onSubmit={submit} noValidate className="space-y-6">
+        <Field label="Camp name" htmlFor="camp-title" required error={errors.title}>
+          <input
+            id="camp-title"
+            type="text"
+            maxLength={150}
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value)
+              clear('title')
+            }}
+            placeholder="e.g. Community Blood Drive"
+            className={inputClass(errors.title)}
+          />
+        </Field>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Field label="Date" htmlFor="camp-date" required error={errors.campDate}>
+            <input
+              id="camp-date"
+              type="date"
+              min={today}
+              value={campDate}
+              onChange={(e) => {
+                setCampDate(e.target.value)
+                clear('campDate')
+              }}
+              className={inputClass(errors.campDate)}
+            />
+          </Field>
+          <Field label="Starts" htmlFor="camp-start" required error={errors.start}>
+            <input
+              id="camp-start"
+              type="time"
+              value={start}
+              onChange={(e) => {
+                setStart(e.target.value)
+                clear('start')
+                clear('end')
+              }}
+              className={inputClass(errors.start)}
+            />
+          </Field>
+          <Field label="Ends" htmlFor="camp-end" required error={errors.end}>
+            <input
+              id="camp-end"
+              type="time"
+              value={end}
+              onChange={(e) => {
+                setEnd(e.target.value)
+                clear('end')
+              }}
+              className={inputClass(errors.end)}
+            />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="sm:col-span-2">
+            <Field label="Venue" htmlFor="camp-venue" required error={errors.venue}>
+              <input
+                id="camp-venue"
+                type="text"
+                maxLength={200}
+                value={venue}
+                onChange={(e) => {
+                  setVenue(e.target.value)
+                  clear('venue')
+                }}
+                placeholder="e.g. Community Hall, Main Road"
+                className={inputClass(errors.venue)}
+              />
+            </Field>
+          </div>
+          <Field label="Target units" htmlFor="camp-target" required error={errors.target}>
+            <input
+              id="camp-target"
+              type="text"
+              inputMode="numeric"
+              value={target}
+              onChange={(e) => {
+                setTarget(e.target.value.replace(/\D/g, '').slice(0, 4))
+                clear('target')
+              }}
+              className={inputClass(errors.target)}
+            />
+          </Field>
+        </div>
+
+        <Buttons
+          onClose={onClose}
+          saveLabel="Create camp"
+          saveIcon="add_circle"
+          saving={saving}
+          formError={formError}
+        />
       </form>
     </Modal>
   )

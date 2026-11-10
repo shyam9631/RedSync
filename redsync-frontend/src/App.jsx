@@ -12,6 +12,8 @@ import HospitalLogin from './pages/auth/HospitalLogin'
 import DonorRegister from './pages/auth/DonorRegister'
 import HospitalRegister from './pages/auth/HospitalRegister'
 import DonorDashboard from './pages/donor/DonorDashboard'
+import DonorProfile from './pages/donor/DonorProfile'
+import DonorRequests from './pages/donor/DonorRequests'
 import HospitalDashboard from './pages/hospital/HospitalDashboard'
 
 export default function App() {
@@ -33,6 +35,9 @@ export default function App() {
       <Route element={<ProtectedRoute role="donor" />}>
         <Route element={<DashboardLayout role="donor" />}>
           <Route path="/donor/dashboard" element={<DonorDashboard />} />
+          <Route path="/donor/requests" element={<DonorRequests />} />
+          <Route path="/donor/profile" element={<DonorProfile />} />
+          <Route path="/donor/alerts" element={<DonorProfile />} />
           <Route path="/donor/*" element={<ComingSoon />} />
         </Route>
       </Route>

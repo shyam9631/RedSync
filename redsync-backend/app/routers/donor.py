@@ -21,6 +21,7 @@ from app.models_more import Camp, CampRegistration
 from app.utils import (
     ACTIVE_STATUSES,
     camp_out,
+    donor_code,
     eligibility,
     iso,
     log_activity,
@@ -41,6 +42,8 @@ STEP = {"accepted": 1, "confirmed": 2, "completed": 3}
 def _profile(donor: Donor) -> dict:
     user = donor.user
     return {
+        "code": donor_code(donor.id),
+        "member_since": iso(user.created_at),
         "name": user.name,
         "phone": user.phone,
         "email": user.email,

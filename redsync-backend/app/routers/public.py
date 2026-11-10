@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app import schemas, schemas_more as sm
 from app.database import get_db
-from app.models import BloodStock, Hospital, User, utcnow
+from app.models import BloodRequest, BloodStock, Donation, Donor, Hospital, User, utcnow
 from app.models_more import PublicRequest
 from app.security import verify_password
 from app.utils import (
@@ -112,6 +112,28 @@ def availability(city: Optional[str] = None, db: Session = Depends(get_db)):
         {"group": g, "units": totals.get(g, 0), "status": stock_status(totals.get(g, 0))}
         for g in BLOOD_GROUPS
     ]
+
+
+@router.get("/stats")
+def stats(db: Session = Depends(get_db)):
+    """Real totals for the landing page. Counts only: no personal details."""
+    donors = db.scalar(
+        select(func.count(Donor.id))
+        .select_from(Donor)
+        .join(User, User.id == Donor.user_id)
+        .where(User.is_active.is_(True))
+    )
+    hospitals = db.scalar(select(func.count(Hospital.id)).where(Hospital.status == "approved"))
+    donations = db.scalar(select(func.count(Donation.id)))
+    units = db.scalar(select(func.sum(Donation.units)))
+    fulfilled = db.scalar(select(func.count(BloodRequest.id)).where(BloodRequest.status == "fulfilled"))
+    return {
+        "donors": int(donors or 0),
+        "hospitals": int(hospitals or 0),
+        "donations": int(donations or 0),
+        "units_collected": int(units or 0),
+        "requests_fulfilled": int(fulfilled or 0),
+    }
 
 
 @router.get("/camps")

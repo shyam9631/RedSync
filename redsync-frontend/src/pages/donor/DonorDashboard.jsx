@@ -1,50 +1,62 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../../context/AuthContext'
-import {
-  ALL_GROUPS,
-  DONATE_TO,
-  SAMPLE_PROFILE,
-  SAMPLE_HISTORY,
-  buildRequests,
-  buildCamps,
-  getEligibility,
-  formatDate,
-  timeAgo,
-} from '../../data/donorDemo'
-
-function readAvailable() {
-  try {
-    return localStorage.getItem('redsync_donor_available') !== 'off'
-  } catch {
-    return true
-  }
-}
+import api, { errorMessage } from '../../lib/api'
+import { ALL_GROUPS, DONATE_TO, formatDate } from '../../data/donorDemo'
 
 const RING_PATH =
   'M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831'
 
+const URGENCY_LABEL = { critical: 'Critical', urgent: 'Urgent', normal: 'Normal' }
+
+function minutesSince(iso) {
+  if (!iso) return 0
+  return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+}
+
+function timeAgo(iso) {
+  const mins = minutesSince(iso)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} min ago`
+  const h = Math.round(mins / 60)
+  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`
+  const d = Math.round(h / 24)
+  return `${d} day${d === 1 ? '' : 's'} ago`
+}
+
+function formatTime(hhmm) {
+  if (!hhmm) return ''
+  const [h, m] = hhmm.split(':').map(Number)
+  const d = new Date()
+  d.setHours(h, m, 0, 0)
+  return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
+}
+
 /* ---------- Request card ---------- */
 function RequestCard({ r, isAccepted, canAccept, blockedReason, onAccept, onDecline }) {
   const critical = r.urgency === 'critical'
+  const normal = r.urgency === 'normal'
   return (
     <div className="bg-surface-container-lowest rounded-2xl p-5 border border-surface-container shadow-sm hover:shadow-md transition-shadow">
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0 font-badge-blood-group text-[16px] font-bold shadow-sm">
-            {r.group}
+            {r.blood_group}
           </div>
           <div>
             <div className="flex items-center flex-wrap gap-2">
               <h3 className="font-headline-sm text-[18px] leading-6 font-bold text-on-surface">
-                {r.hospital}
+                {r.hospital.name}
               </h3>
               <span
                 className={`px-2.5 py-0.5 rounded-full font-label-sm text-label-sm font-semibold ${
-                  critical ? 'bg-error-container text-on-error-container' : 'bg-amber-100 text-amber-800'
+                  critical
+                    ? 'bg-error-container text-on-error-container'
+                    : normal
+                    ? 'bg-surface-container text-secondary'
+                    : 'bg-amber-100 text-amber-800'
                 }`}
               >
-                {critical ? 'Critical' : 'Urgent'}
+                {URGENCY_LABEL[r.urgency] || 'Urgent'}
               </span>
               {isAccepted && (
                 <span className="px-2.5 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-sm text-label-sm font-semibold">
@@ -60,12 +72,15 @@ function RequestCard({ r, isAccepted, canAccept, blockedReason, onAccept, onDecl
               </span>
               <span className="text-outline-variant">•</span>
               <span className="flex items-center gap-1">
-                <span className="material-symbols-outlined text-[14px]">near_me</span>
-                {r.distanceKm} km away
+                <span className="material-symbols-outlined text-[14px]">location_on</span>
+                {r.hospital.city}
               </span>
               <span className="text-outline-variant">•</span>
-              <span>{timeAgo(r.postedMins)}</span>
+              <span>{timeAgo(r.posted_at)}</span>
             </div>
+            {r.notes && (
+              <p className="mt-2 font-body-sm text-body-sm text-secondary">{r.notes}</p>
+            )}
           </div>
         </div>
 
@@ -104,7 +119,9 @@ function StatusTracker({ completed, acceptedAt }) {
   const steps = [
     {
       label: 'Accepted',
-      note: acceptedAt.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }),
+      note: acceptedAt
+        ? new Date(acceptedAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
+        : '',
     },
     { label: 'Hospital confirmed', note: completed >= 2 ? 'Confirmed' : 'Waiting for hospital' },
     { label: 'Donation completed', note: completed >= 3 ? 'Done' : 'Final step' },
@@ -154,35 +171,36 @@ function StatusTracker({ completed, acceptedAt }) {
 
 /* ---------- Page ---------- */
 export default function DonorDashboard() {
-  const { user } = useAuth()
+  const [dash, setDash] = useState(null)
+  const [requests, setRequests] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  // Saved profile fields override the sample profile
-  const profile = { ...SAMPLE_PROFILE, ...user }
-  const usingSample = !user?.bloodGroup
-  const firstName = (user?.name || 'Donor').split(' ')[0]
-  const group = profile.bloodGroup
-  const radius = profile.radius ?? 10
-  const eligibility = getEligibility(profile)
-  const history = SAMPLE_HISTORY
-
-  const [available, setAvailable] = useState(readAvailable)
-  const [requests] = useState(() => buildRequests(group))
-  const [camps] = useState(buildCamps)
   const [filter, setFilter] = useState('all')
-  const [declined, setDeclined] = useState([])
-  const [fulfilled, setFulfilled] = useState([])
   const [pending, setPending] = useState(null)
-  const [active, setActive] = useState(null)
-  const [registered, setRegistered] = useState([])
+  const [dismissedId, setDismissedId] = useState(null)
 
-  const toggleAvailable = (value) => {
-    setAvailable(value)
+  // Reload everything the page shows from the server
+  const load = useCallback(async ({ quiet = false, spinner = !quiet } = {}) => {
+    if (spinner) setLoading(true)
     try {
-      localStorage.setItem('redsync_donor_available', value ? 'on' : 'off')
-    } catch {
-      /* ignore storage errors */
+      const [d, r] = await Promise.all([api.get('/donor/dashboard'), api.get('/donor/requests')])
+      setDash(d.data)
+      setRequests(r.data.requests || [])
+      setLoadError('')
+    } catch (err) {
+      if (!quiet) setLoadError(errorMessage(err))
+      else setActionError(errorMessage(err))
+    } finally {
+      setLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    load({ spinner: false }) // `loading` already starts as true
+  }, [load])
 
   // Close the accept dialog with Escape
   useEffect(() => {
@@ -194,46 +212,101 @@ export default function DonorDashboard() {
     return () => document.removeEventListener('keydown', onKey)
   }, [pending])
 
-  // Requests within the donor's radius, nearest first
-  const inRange = requests
-    .filter((r) => r.distanceKm <= radius && !fulfilled.includes(r.id))
-    .sort((a, b) => a.distanceKm - b.distanceKm)
-  const live = inRange.filter((r) => !declined.includes(r.id))
-  const counts = {
-    all: live.length,
-    critical: live.filter((r) => r.urgency === 'critical').length,
-    urgent: live.filter((r) => r.urgency === 'urgent').length,
+  // Runs an API action, shows its error, then refreshes the page data
+  const run = async (fn) => {
+    setActionError('')
+    setBusy(true)
+    try {
+      await fn()
+      await load({ quiet: true })
+    } catch (err) {
+      setActionError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
   }
-  const list = inRange.filter((r) => filter === 'all' || r.urgency === filter)
 
-  const canAccept = eligibility.eligible && !active
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-secondary">
+        <span className="material-symbols-outlined text-[32px] animate-spin">progress_activity</span>
+        <p className="mt-3 font-body-md text-body-md">Loading your dashboard…</p>
+      </div>
+    )
+  }
+
+  if (loadError || !dash) {
+    return (
+      <div className="max-w-md mx-auto py-20 text-center">
+        <div className="w-12 h-12 rounded-full bg-error-container text-error flex items-center justify-center mx-auto mb-3">
+          <span className="material-symbols-outlined text-[24px]">cloud_off</span>
+        </div>
+        <h2 className="font-headline-sm text-headline-sm text-on-surface">
+          Could not load your dashboard
+        </h2>
+        <p className="font-body-md text-body-md text-secondary mt-1">{loadError}</p>
+        <button
+          type="button"
+          onClick={() => load()}
+          className="mt-5 px-6 py-2.5 rounded-full bg-primary-container hover:bg-primary text-on-primary font-label-md text-label-md cursor-pointer"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  const { profile, eligibility, stats, history, camps } = dash
+  const available = dash.available
+  const activeRaw = dash.active_response
+  const active = activeRaw && activeRaw.response_id !== dismissedId ? activeRaw : null
+  const completed = active ? active.step : 0
+  const group = profile.blood_group
+  const firstName = (profile.name || 'Donor').split(' ')[0]
+
+  // A request I already donated for is finished, so it no longer belongs in the list
+  const liveRequests = requests.filter((r) => r.my_status !== 'completed')
+  const counts = {
+    all: liveRequests.length,
+    critical: liveRequests.filter((r) => r.urgency === 'critical').length,
+    urgent: liveRequests.filter((r) => r.urgency === 'urgent').length,
+  }
+  const list = liveRequests.filter((r) => filter === 'all' || r.urgency === filter)
+
+  const hasActive = active && active.status !== 'completed'
+  const canAccept = eligibility.eligible && !hasActive && !busy
   const blockedReason = !eligibility.eligible
     ? 'You are not eligible to donate yet.'
     : 'You already have an active response.'
 
+  const toggleAvailable = (value) =>
+    run(() => api.patch('/donor/availability', { available: value }))
+
   const confirmAccept = () => {
-    setActive({ request: pending, acceptedAt: new Date(), completed: 1 })
+    const id = pending.id
     setPending(null)
+    run(() => api.post(`/donor/requests/${id}/accept`))
   }
+
+  const declineRequest = (id) => run(() => api.post(`/donor/requests/${id}/decline`))
 
   const cancelResponse = () => {
-    if (window.confirm('Cancel your response to this request?')) setActive(null)
+    if (!window.confirm('Cancel your response to this request?')) return
+    run(() => api.post(`/donor/responses/${active.response_id}/cancel`))
   }
 
-  const finishResponse = () => {
-    setFulfilled((f) => [...f, active.request.id])
-    setActive(null)
-  }
-
-  const toggleCamp = (id) =>
-    setRegistered((r) => (r.includes(id) ? r.filter((x) => x !== id) : [...r, id]))
+  const toggleCamp = (c) =>
+    run(() =>
+      c.is_registered
+        ? api.delete(`/donor/camps/${c.id}/register`)
+        : api.post(`/donor/camps/${c.id}/register`)
+    )
 
   // Compatibility
   const canGiveTo = DONATE_TO[group] || []
   const cannotGiveTo = ALL_GROUPS.filter((g) => !canGiveTo.includes(g))
 
-  const lastDonationText =
-    profile.neverDonated || !profile.lastDonation ? 'Never' : formatDate(profile.lastDonation)
+  const lastDonationText = stats.last_donation ? formatDate(stats.last_donation) : 'Never'
 
   const filters = [
     { key: 'all', label: `All (${counts.all})` },
@@ -243,13 +316,21 @@ export default function DonorDashboard() {
 
   return (
     <div className="flex flex-col w-full pb-8">
-      {usingSample && (
-        <div className="mb-6 flex items-start gap-2.5 rounded-xl bg-surface-container px-4 py-3 text-on-surface-variant">
-          <span className="material-symbols-outlined text-[20px] text-primary shrink-0">info</span>
-          <p className="font-body-sm text-body-sm">
-            Demo mode: this page shows a sample donor profile and sample requests until the backend
-            is connected.
-          </p>
+      {actionError && (
+        <div
+          role="alert"
+          className="mb-6 flex items-start gap-2.5 rounded-xl bg-error-container px-4 py-3 text-on-error-container"
+        >
+          <span className="material-symbols-outlined text-[20px] shrink-0">error</span>
+          <p className="font-body-sm text-body-sm flex-1">{actionError}</p>
+          <button
+            type="button"
+            onClick={() => setActionError('')}
+            aria-label="Dismiss message"
+            className="cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[18px]">close</span>
+          </button>
         </div>
       )}
 
@@ -267,7 +348,8 @@ export default function DonorDashboard() {
                 Welcome back, {firstName}
               </h1>
               <p className="font-body-sm text-body-sm text-secondary">
-                {profile.area}, {profile.city}
+                {profile.area ? `${profile.area}, ` : ''}
+                {profile.city}
               </p>
             </div>
             <div className="w-14 h-14 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0 shadow-sm font-badge-blood-group text-xl font-extrabold">
@@ -275,8 +357,8 @@ export default function DonorDashboard() {
             </div>
           </div>
           <div className="mt-6 pt-4 border-t border-surface-container-high flex items-center justify-between font-label-sm text-label-sm">
-            <span className="text-secondary">Alert radius</span>
-            <span className="font-semibold text-on-surface">{radius} km</span>
+            <span className="text-secondary">Matching requests in</span>
+            <span className="font-semibold text-on-surface">{profile.city}</span>
           </div>
         </div>
 
@@ -291,6 +373,7 @@ export default function DonorDashboard() {
                 <input
                   type="checkbox"
                   checked={available}
+                  disabled={busy}
                   onChange={(e) => toggleAvailable(e.target.checked)}
                   aria-label="Available to donate"
                   className="sr-only peer"
@@ -376,22 +459,22 @@ export default function DonorDashboard() {
               <div className="font-label-md text-label-md font-semibold text-on-surface">
                 {eligibility.eligible
                   ? 'Eligible now'
-                  : `Eligible again in ${eligibility.daysLeft} day${
-                      eligibility.daysLeft === 1 ? '' : 's'
+                  : `Eligible again in ${eligibility.days_left} day${
+                      eligibility.days_left === 1 ? '' : 's'
                     }`}
               </div>
               <div className="font-body-sm text-body-sm text-secondary">
                 {eligibility.eligible
-                  ? profile.neverDonated || !profile.lastDonation
+                  ? profile.never_donated
                     ? 'No earlier donation on record'
-                    : `${eligibility.gap}-day gap since your last donation is over`
-                  : `Next eligible date: ${formatDate(eligibility.nextDate)}`}
+                    : `${eligibility.gap_days}-day gap since your last donation is over`
+                  : `Next eligible date: ${formatDate(eligibility.next_eligible)}`}
               </div>
             </div>
           </div>
 
           <p className="mt-4 pt-3 border-t border-surface-container-high font-body-sm text-[12px] text-secondary">
-            Whole blood donors can give again after {eligibility.gap} days.
+            Whole blood donors can give again after {eligibility.gap_days} days.
           </p>
         </div>
       </section>
@@ -403,17 +486,12 @@ export default function DonorDashboard() {
           {/* Requests */}
           <section className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h2 className="font-headline-sm text-headline-sm text-on-surface tracking-tight">
-                  Urgent requests near you
-                </h2>
-                <span className="px-2 py-0.5 rounded-full bg-surface-container text-secondary font-label-sm text-label-sm">
-                  Sample data
-                </span>
-              </div>
+              <h2 className="font-headline-sm text-headline-sm text-on-surface tracking-tight">
+                Urgent requests near you
+              </h2>
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-low text-secondary font-label-sm text-label-sm self-start sm:self-auto">
                 <span className="material-symbols-outlined text-[16px]">swap_vert</span>
-                Nearest first • within {radius} km
+                Most urgent first • {group} • {profile.city}
               </span>
             </div>
 
@@ -438,11 +516,11 @@ export default function DonorDashboard() {
               <div className="flex items-start gap-2.5 rounded-xl bg-amber-100 px-4 py-3 text-amber-900">
                 <span className="material-symbols-outlined text-[20px] shrink-0">hourglass_top</span>
                 <p className="font-body-sm text-body-sm">
-                  You can accept requests again on {formatDate(eligibility.nextDate)}.
+                  You can accept requests again on {formatDate(eligibility.next_eligible)}.
                 </p>
               </div>
             )}
-            {active && (
+            {hasActive && (
               <p className="font-body-sm text-body-sm text-secondary">
                 Finish or cancel your active response to accept another request.
               </p>
@@ -461,8 +539,9 @@ export default function DonorDashboard() {
                 </p>
                 <button
                   type="button"
+                  disabled={busy}
                   onClick={() => toggleAvailable(true)}
-                  className="mt-4 px-5 py-2 rounded-full bg-primary-container hover:bg-primary text-on-primary font-label-md text-label-md transition-colors cursor-pointer"
+                  className="mt-4 px-5 py-2 rounded-full bg-primary-container hover:bg-primary text-on-primary font-label-md text-label-md transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Turn availability on
                 </button>
@@ -476,38 +555,22 @@ export default function DonorDashboard() {
                   No matching requests right now. We will notify you when one comes up.
                 </h4>
                 <p className="font-body-sm text-body-sm text-secondary max-w-md mt-1">
-                  You will be alerted when a request within {radius} km needs your blood group.
+                  You will be alerted when a hospital in {profile.city} needs {group} blood.
                 </p>
               </div>
             ) : (
               <div className="space-y-4">
-                {list.map((r) =>
-                  declined.includes(r.id) ? (
-                    <div
-                      key={r.id}
-                      className="flex items-center justify-between gap-3 bg-surface-container-low rounded-xl px-4 py-3 font-body-sm text-body-sm text-secondary"
-                    >
-                      <span>Request from {r.hospital} hidden.</span>
-                      <button
-                        type="button"
-                        onClick={() => setDeclined((d) => d.filter((x) => x !== r.id))}
-                        className="text-primary font-semibold hover:underline cursor-pointer"
-                      >
-                        Undo
-                      </button>
-                    </div>
-                  ) : (
-                    <RequestCard
-                      key={r.id}
-                      r={r}
-                      isAccepted={active?.request.id === r.id}
-                      canAccept={canAccept}
-                      blockedReason={blockedReason}
-                      onAccept={() => setPending(r)}
-                      onDecline={() => setDeclined((d) => [...d, r.id])}
-                    />
-                  )
-                )}
+                {list.map((r) => (
+                  <RequestCard
+                    key={r.id}
+                    r={r}
+                    isAccepted={active?.request.id === r.id}
+                    canAccept={canAccept}
+                    blockedReason={blockedReason}
+                    onAccept={() => setPending(r)}
+                    onDecline={() => declineRequest(r.id)}
+                  />
+                ))}
               </div>
             )}
           </section>
@@ -532,12 +595,12 @@ export default function DonorDashboard() {
               {active && (
                 <span
                   className={`px-2.5 py-0.5 rounded-full font-label-sm text-label-sm font-semibold ${
-                    active.completed === 3
+                    completed === 3
                       ? 'bg-tertiary-fixed text-on-tertiary-fixed'
                       : 'bg-amber-100 text-amber-800'
                   }`}
                 >
-                  {active.completed === 3 ? 'Completed' : 'In progress'}
+                  {completed === 3 ? 'Completed' : 'In progress'}
                 </span>
               )}
             </div>
@@ -549,20 +612,20 @@ export default function DonorDashboard() {
             ) : (
               <>
                 <div className="py-6">
-                  <StatusTracker completed={active.completed} acceptedAt={active.acceptedAt} />
+                  <StatusTracker completed={completed} acceptedAt={active.accepted_at} />
                 </div>
 
                 <div className="p-4 bg-surface-container-low rounded-xl space-y-3 font-body-sm text-body-sm">
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
                     <div>
                       <div className="font-label-md text-label-md font-bold text-on-surface">
-                        {active.request.hospital}
+                        {active.hospital.name}
                       </div>
                       <div className="text-secondary flex items-center gap-1.5 mt-0.5">
                         <span className="material-symbols-outlined text-[16px] text-outline shrink-0">
                           location_on
                         </span>
-                        {active.request.address}
+                        {active.hospital.address}, {active.hospital.city}
                       </div>
                     </div>
                     <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-surface-container-lowest border border-outline-variant text-on-surface font-label-sm text-label-sm font-semibold shrink-0 self-start">
@@ -574,14 +637,14 @@ export default function DonorDashboard() {
                     </div>
                   </div>
 
-                  {active.completed === 3 ? (
+                  {completed === 3 ? (
                     <div className="pt-2 border-t border-outline-variant/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <p className="text-on-surface">
                         Donation completed. Thank you! The hospital will record it in your history.
                       </p>
                       <button
                         type="button"
-                        onClick={finishResponse}
+                        onClick={() => setDismissedId(active.response_id)}
                         className="px-4 py-2 rounded-full bg-primary-container hover:bg-primary text-on-primary font-label-md text-label-md transition-colors cursor-pointer self-start sm:self-auto"
                       >
                         Dismiss
@@ -589,31 +652,42 @@ export default function DonorDashboard() {
                     </div>
                   ) : (
                     <div className="pt-2 border-t border-outline-variant/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 text-on-surface">
-                        <span className="material-symbols-outlined text-[18px] text-secondary">
-                          call
-                        </span>
-                        <span className="font-medium">Hospital desk:</span>
-                        <span className="font-semibold">{active.request.phone} (sample)</span>
+                      <div className="flex flex-col gap-1 text-on-surface">
+                        <div className="flex items-center gap-2">
+                          <span className="material-symbols-outlined text-[18px] text-secondary">
+                            call
+                          </span>
+                          <span className="font-medium">Hospital desk:</span>
+                          <a
+                            href={`tel:${active.hospital.phone}`}
+                            className="font-semibold hover:underline"
+                          >
+                            {active.hospital.phone}
+                          </a>
+                        </div>
+                        {active.hospital.emergency_phone && (
+                          <div className="flex items-center gap-2">
+                            <span className="material-symbols-outlined text-[18px] text-error">
+                              emergency
+                            </span>
+                            <span className="font-medium">Emergency:</span>
+                            <a
+                              href={`tel:${active.hospital.emergency_phone}`}
+                              className="font-semibold hover:underline"
+                            >
+                              {active.hospital.emergency_phone}
+                            </a>
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-4 self-start sm:self-auto">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActive((a) => ({ ...a, completed: Math.min(3, a.completed + 1) }))
-                          }
-                          className="font-label-sm text-label-sm text-secondary hover:text-primary underline cursor-pointer"
-                        >
-                          Demo: simulate hospital update
-                        </button>
-                        <button
-                          type="button"
-                          onClick={cancelResponse}
-                          className="font-label-sm text-label-sm text-secondary hover:text-error underline cursor-pointer"
-                        >
-                          Cancel my response
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={cancelResponse}
+                        className="font-label-sm text-label-sm text-secondary hover:text-error underline cursor-pointer self-start sm:self-auto disabled:opacity-50"
+                      >
+                        Cancel my response
+                      </button>
                     </div>
                   )}
                 </div>
@@ -636,7 +710,7 @@ export default function DonorDashboard() {
                   <span className="font-label-sm text-label-sm text-secondary">Donations</span>
                 </div>
                 <div className="font-headline-lg text-[28px] leading-8 font-bold text-on-surface">
-                  {history.length}
+                  {stats.total_donations}
                 </div>
                 <div className="font-body-sm text-[11px] text-secondary mt-0.5">
                   Confirmed by hospitals
@@ -702,35 +776,40 @@ export default function DonorDashboard() {
             <h2 className="font-headline-sm text-[16px] leading-5 font-semibold text-on-surface mb-3">
               Upcoming camps near you
             </h2>
-            <div className="space-y-3 font-body-sm text-body-sm">
-              {camps.map((c) => {
-                const isReg = registered.includes(c.id)
-                return (
+            {camps.length === 0 ? (
+              <p className="font-body-sm text-body-sm text-secondary">
+                No camps are scheduled in {profile.city} right now.
+              </p>
+            ) : (
+              <div className="space-y-3 font-body-sm text-body-sm">
+                {camps.map((c) => (
                   <div key={c.id} className="p-3.5 bg-surface-container-low rounded-xl space-y-1.5">
                     <div className="flex items-start justify-between gap-2">
                       <h3 className="font-semibold text-on-surface">{c.title}</h3>
                       <button
                         type="button"
-                        onClick={() => toggleCamp(c.id)}
-                        title={isReg ? 'Click to cancel registration' : undefined}
-                        className={`font-label-sm text-label-sm font-semibold shrink-0 cursor-pointer ${
-                          isReg ? 'text-tertiary' : 'text-primary hover:underline'
+                        disabled={busy}
+                        onClick={() => toggleCamp(c)}
+                        title={c.is_registered ? 'Click to cancel registration' : undefined}
+                        className={`font-label-sm text-label-sm font-semibold shrink-0 cursor-pointer disabled:opacity-50 ${
+                          c.is_registered ? 'text-tertiary' : 'text-primary hover:underline'
                         }`}
                       >
-                        {isReg ? 'Registered ✓' : 'Register →'}
+                        {c.is_registered ? 'Registered ✓' : 'Register →'}
                       </button>
                     </div>
                     <p className="text-xs text-secondary">
-                      {formatDate(c.date)} • {c.time}
+                      {formatDate(c.camp_date)} • {formatTime(c.start_time)} –{' '}
+                      {formatTime(c.end_time)}
                     </p>
                     <p className="text-xs text-secondary flex items-center gap-1">
                       <span className="material-symbols-outlined text-[14px]">pin_drop</span>
                       {c.venue}
                     </p>
                   </div>
-                )
-              })}
-            </div>
+                ))}
+              </div>
+            )}
           </section>
 
           {/* Compatibility */}
@@ -842,13 +921,13 @@ export default function DonorDashboard() {
             </h3>
             <div className="my-4 p-3.5 bg-surface-container-low rounded-xl space-y-1">
               <div className="font-label-md text-label-md font-bold text-on-surface">
-                {pending.hospital}
+                {pending.hospital.name}
               </div>
               <div className="font-body-sm text-body-sm text-secondary">
                 {pending.component} • {pending.units} unit{pending.units === 1 ? '' : 's'} needed
               </div>
               <div className="font-body-sm text-[12px] text-secondary">
-                {pending.distanceKm} km away
+                {pending.hospital.address}, {pending.hospital.city}
               </div>
             </div>
             <p className="font-body-sm text-body-sm text-secondary leading-relaxed mb-6">
