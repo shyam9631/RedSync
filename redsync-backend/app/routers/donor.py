@@ -376,6 +376,68 @@ def camps(donor: Donor = Depends(current_donor), db: Session = Depends(get_db)):
     return upcoming_camps(db, donor.city, donor.id)
 
 
+PROXIMITY_ORDER = {"area": 0, "nearby": 1, "city": 2, "other": 3}
+
+
+def _proximity(donor: Donor, hospital: Hospital, camp: Camp) -> str:
+    """How close a camp is, from PIN codes and city names (there are no map coordinates yet).
+
+    area   - the organising hospital has the same PIN code as the donor
+    nearby - same first three PIN digits (the same postal district)
+    city   - same city
+    other  - a different city
+    """
+    if hospital.pin and donor.pin and hospital.pin == donor.pin:
+        return "area"
+    if hospital.pin and donor.pin and hospital.pin[:3] == donor.pin[:3]:
+        return "nearby"
+    if camp.city.strip().lower() == donor.city.strip().lower():
+        return "city"
+    return "other"
+
+
+@router.get("/camps/browse")
+def browse_camps(
+    scope: Literal["city", "all"] = "city",
+    donor: Donor = Depends(current_donor),
+    db: Session = Depends(get_db),
+):
+    """Upcoming camps ordered by closeness to the donor, plus the camps the donor registered for."""
+    e = eligibility(donor)
+    rows = db.execute(
+        select(Camp, Hospital)
+        .join(Hospital, Hospital.id == Camp.hospital_id)
+        .where(
+            Camp.status == "active",
+            Camp.camp_date >= date.today(),
+            Hospital.status == "approved",
+        )
+    ).all()
+
+    camps_out, mine = [], []
+    for camp, hospital in rows:
+        item = camp_out(db, camp, hospital.name, donor.id)
+        item["hospital_address"] = hospital.address
+        item["hospital_pin"] = hospital.pin
+        item["proximity"] = _proximity(donor, hospital, camp)
+        blocked = bool(e["next_eligible"] and camp.camp_date < e["next_eligible"])
+        item["can_register"] = not blocked
+        item["next_eligible"] = e["next_eligible"] if blocked else None
+        if item["is_registered"]:
+            mine.append(item)
+        if scope == "all" or item["proximity"] != "other":
+            camps_out.append(item)
+
+    camps_out.sort(key=lambda c: (PROXIMITY_ORDER[c["proximity"]], c["camp_date"], c["start_time"]))
+    mine.sort(key=lambda c: (c["camp_date"], c["start_time"]))
+    return {
+        "location": {"city": donor.city, "area": donor.area, "pin": donor.pin},
+        "eligibility": e,
+        "camps": camps_out,
+        "my_camps": mine,
+    }
+
+
 def _open_camp(db: Session, camp_id: int) -> Camp:
     camp = db.get(Camp, camp_id)
     if camp is None or camp.status != "active" or camp.camp_date < date.today():

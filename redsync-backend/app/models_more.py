@@ -77,3 +77,55 @@ class PublicRequest(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(15), default="open", index=True)  # open | forwarded | dismissed
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+class StockBatch(Base):
+    """One lot of blood received by a hospital (a donation, a camp, a transfer in ...).
+
+    The total for a blood group stays in BloodStock.units. Batches say what that total is made of
+    (component and expiry date). Units entered before batches existed are "not specified".
+    """
+
+    __tablename__ = "stock_batches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hospital_id: Mapped[int] = mapped_column(ForeignKey("hospitals.id"), index=True)
+    blood_group: Mapped[str] = mapped_column(String(3), index=True)
+    component: Mapped[str] = mapped_column(String(30))
+    units_received: Mapped[int] = mapped_column(Integer)
+    units_remaining: Mapped[int] = mapped_column(Integer)
+    expiry_date: Mapped[date] = mapped_column(Date, index=True)
+    batch_code: Mapped[Optional[str]] = mapped_column(String(50))
+    storage: Mapped[Optional[str]] = mapped_column(String(80))
+    source: Mapped[str] = mapped_column(String(20), default="manual")  # manual | donation | camp | transfer
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class StockLedger(Base):
+    """Every change to a hospital's stock, newest last. Never edited, so it works as an audit trail."""
+
+    __tablename__ = "stock_ledger"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hospital_id: Mapped[int] = mapped_column(ForeignKey("hospitals.id"), index=True)
+    blood_group: Mapped[str] = mapped_column(String(3), index=True)
+    component: Mapped[Optional[str]] = mapped_column(String(30))  # empty for plain total corrections
+    kind: Mapped[str] = mapped_column(String(10), index=True)  # inward | outward | discard | adjust
+    delta: Mapped[int] = mapped_column(Integer)  # + for stock in, - for stock out
+    balance_after: Mapped[int] = mapped_column(Integer)  # the blood group total afterwards
+    reason: Mapped[str] = mapped_column(String(80))
+    batch_code: Mapped[Optional[str]] = mapped_column(String(50))
+    note: Mapped[Optional[str]] = mapped_column(String(300))
+    recorded_by: Mapped[str] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class StockTarget(Base):
+    """The number of units a hospital wants to hold for a blood group."""
+
+    __tablename__ = "stock_targets"
+    __table_args__ = (UniqueConstraint("hospital_id", "blood_group"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hospital_id: Mapped[int] = mapped_column(ForeignKey("hospitals.id"), index=True)
+    blood_group: Mapped[str] = mapped_column(String(3))
+    target_units: Mapped[int] = mapped_column(Integer)

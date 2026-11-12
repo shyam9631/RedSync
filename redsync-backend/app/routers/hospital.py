@@ -6,6 +6,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app import schemas_more as sm
+from app import stock_ops
 from app.database import get_db
 from app.deps import current_hospital
 from app.models import (
@@ -300,7 +301,7 @@ def update_stock(
     if group not in BLOOD_GROUPS:
         raise HTTPException(404, "Unknown blood group.")
     row = next(r for r in _stock_rows(db, hospital) if r.blood_group == group)
-    row.units = body.units
+    stock_ops.set_total(db, hospital, group, body.units, staff=hospital.contact_name or hospital.name, note=body.notes)
     if body.expiry is not None:
         row.expiry = body.expiry
     if body.notes is not None:
@@ -549,8 +550,6 @@ def record_donation(
                 f"The usual gap is {gap} days."
             )
 
-    stock_rows = {r.blood_group: r for r in _stock_rows(db, hospital)}
-
     donation = Donation(
         hospital_id=hospital.id,
         donor_id=donor.id,
@@ -564,7 +563,13 @@ def record_donation(
     if donor.last_donation is None or body.donation_date > donor.last_donation:
         donor.last_donation = body.donation_date
     donor.never_donated = False
-    stock_rows[donor.blood_group].units += body.units
+    # The donated blood goes into stock as a batch, with the usual shelf life for its component
+    stock_ops.inward(
+        db, hospital, donor.blood_group, body.component, body.units,
+        stock_ops.default_expiry(body.component, body.donation_date),
+        reason="Donor donation", staff=hospital.contact_name or hospital.name,
+        batch_code=body.batch_id, source="donation",
+    )
 
     already_linked = db.scalar(
         select(DonorHospitalLink.id).where(

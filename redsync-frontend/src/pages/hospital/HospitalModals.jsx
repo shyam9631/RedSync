@@ -196,8 +196,8 @@ export function UpdateStockModal({ item, onSave, onClose }) {
 }
 
 /* ---------------- Post urgent request ---------------- */
-export function PostRequestModal({ onSave, onClose }) {
-  const [group, setGroup] = useState('')
+export function PostRequestModal({ onSave, onClose, initialGroup = '' }) {
+  const [group, setGroup] = useState(initialGroup)
   const [units, setUnits] = useState('1')
   const [component, setComponent] = useState(COMPONENTS[0])
   const [urgency, setUrgency] = useState('urgent')

@@ -129,3 +129,51 @@ class PublicRequestIn(BaseModel):
 class AdminLoginIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=64)
+
+# ---------------- Blood stock ----------------
+
+InwardReason = Literal[
+    "Blood camp batch", "Walk-in donor", "Transfer from partner bank", "Emergency inward", "Other"
+]
+OutwardReason = Literal[
+    "Issued to patient", "Issued to OT / ICU", "Transfer to partner bank", "Other"
+]
+DiscardReason = Literal["Expired", "Quality check failed", "Damaged / bag leak", "Other"]
+
+
+class StockInwardIn(BaseModel):
+    blood_group: BloodGroup
+    component: Component
+    units: int = Field(ge=1, le=200)
+    expiry_date: date
+    reason: InwardReason = "Other"
+    batch_code: Optional[str] = Field(default=None, max_length=50)
+    storage: Optional[str] = Field(default=None, max_length=80)
+    note: Optional[str] = Field(default=None, max_length=300)
+
+    @field_validator("expiry_date")
+    @classmethod
+    def not_past(cls, value: date) -> date:
+        if value < date.today():
+            raise ValueError("The expiry date cannot be in the past.")
+        return value
+
+
+class StockOutwardIn(BaseModel):
+    blood_group: BloodGroup
+    component: Component
+    units: int = Field(ge=1, le=200)
+    reason: OutwardReason = "Other"
+    note: Optional[str] = Field(default=None, max_length=300)
+
+
+class StockDiscardIn(BaseModel):
+    blood_group: BloodGroup
+    component: Component
+    units: int = Field(ge=1, le=200)
+    reason: DiscardReason = "Other"
+    note: Optional[str] = Field(default=None, max_length=300)
+
+
+class StockTargetIn(BaseModel):
+    target_units: int = Field(ge=1, le=2000)
