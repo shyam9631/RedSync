@@ -11,6 +11,7 @@ import DonorLogin from './pages/auth/DonorLogin'
 import HospitalLogin from './pages/auth/HospitalLogin'
 import DonorRegister from './pages/auth/DonorRegister'
 import HospitalRegister from './pages/auth/HospitalRegister'
+import HospitalForgotPassword from './pages/auth/HospitalForgotPassword'
 import DonorDashboard from './pages/donor/DonorDashboard'
 import DonorProfile from './pages/donor/DonorProfile'
 import DonorRequests from './pages/donor/DonorRequests'
@@ -18,6 +19,8 @@ import DonorCamps from './pages/donor/DonorCamps'
 import DonorHistory from './pages/donor/DonorHistory'
 import HospitalDashboard from './pages/hospital/HospitalDashboard'
 import HospitalStock from './pages/hospital/HospitalStock'
+import HospitalCamps from './pages/hospital/HospitalCamps'
+import HospitalRequests from './pages/hospital/HospitalRequests'
 
 export default function App() {
   return (
@@ -30,6 +33,7 @@ export default function App() {
         <Route path="/login" element={<LoginChooser />} />
         <Route path="/login/donor" element={<DonorLogin />} />
         <Route path="/login/hospital" element={<HospitalLogin />} />
+        <Route path="/forgot-password" element={<HospitalForgotPassword />} />
         <Route path="/register/donor" element={<DonorRegister />} />
         <Route path="/register/hospital" element={<HospitalRegister />} />
       </Route>
@@ -52,6 +56,8 @@ export default function App() {
         <Route element={<DashboardLayout role="hospital" />}>
           <Route path="/hospital/dashboard" element={<HospitalDashboard />} />
           <Route path="/hospital/stock" element={<HospitalStock />} />
+          <Route path="/hospital/camps" element={<HospitalCamps />} />
+          <Route path="/hospital/requests" element={<HospitalRequests />} />
           <Route path="/hospital/*" element={<ComingSoon />} />
         </Route>
       </Route>

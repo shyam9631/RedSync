@@ -129,3 +129,18 @@ class StockTarget(Base):
     hospital_id: Mapped[int] = mapped_column(ForeignKey("hospitals.id"), index=True)
     blood_group: Mapped[str] = mapped_column(String(3))
     target_units: Mapped[int] = mapped_column(Integer)
+
+
+class CampAttendance(Base):
+    """What happened to a registered donor on the day of a camp: donated, or turned up but was deferred."""
+
+    __tablename__ = "camp_attendance"
+    __table_args__ = (UniqueConstraint("camp_id", "donor_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    camp_id: Mapped[int] = mapped_column(ForeignKey("camps.id"), index=True)
+    donor_id: Mapped[int] = mapped_column(ForeignKey("donors.id"), index=True)
+    status: Mapped[str] = mapped_column(String(10))  # donated | deferred
+    donation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("donations.id"))
+    note: Mapped[Optional[str]] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

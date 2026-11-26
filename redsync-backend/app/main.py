@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import models, models_more  # noqa: F401  (importing these registers the tables)
 from app.database import Base, engine, get_db
-from app.routers import admin, auth, donor, hospital, notifications, public, stock
+from app.routers import admin, auth, camps, donor, hospital, notifications, public, request_board, stock
 
 
 @asynccontextmanager
@@ -38,6 +38,8 @@ app.include_router(public.router)
 app.include_router(donor.router)
 app.include_router(hospital.router)
 app.include_router(stock.router)
+app.include_router(camps.router)
+app.include_router(request_board.router)
 app.include_router(notifications.router)
 app.include_router(admin.router)
 

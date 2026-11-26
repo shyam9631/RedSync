@@ -562,13 +562,14 @@ export function RecordDonationModal({ donors, initialDonorId, responseId, onSave
 }
 
 /* ---------------- Create a donation camp ---------------- */
-export function CreateCampModal({ onSave, onClose }) {
-  const [title, setTitle] = useState('')
-  const [campDate, setCampDate] = useState('')
-  const [start, setStart] = useState('09:00')
-  const [end, setEnd] = useState('15:00')
-  const [venue, setVenue] = useState('')
-  const [target, setTarget] = useState('50')
+export function CreateCampModal({ onSave, onClose, camp = null }) {
+  const editing = Boolean(camp)
+  const [title, setTitle] = useState(camp?.title ?? '')
+  const [campDate, setCampDate] = useState(camp?.camp_date ?? '')
+  const [start, setStart] = useState(camp?.start_time ?? '09:00')
+  const [end, setEnd] = useState(camp?.end_time ?? '15:00')
+  const [venue, setVenue] = useState(camp?.venue ?? '')
+  const [target, setTarget] = useState(String(camp?.target_units ?? 50))
   const [errors, setErrors] = useState({})
   const { saving, formError, run } = useSave(onSave)
 
@@ -601,8 +602,12 @@ export function CreateCampModal({ onSave, onClose }) {
 
   return (
     <Modal
-      title="Create a donation camp"
-      subtitle="Donors in your city will see it and can register."
+      title={editing ? 'Edit donation camp' : 'Create a donation camp'}
+      subtitle={
+        editing
+          ? 'Registered donors are notified if the date, time or venue changes.'
+          : 'Donors in your city will see it and can register.'
+      }
       leading={
         <div className="w-10 h-10 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0">
           <span className="material-symbols-outlined text-[20px]">event</span>
@@ -701,8 +706,8 @@ export function CreateCampModal({ onSave, onClose }) {
 
         <Buttons
           onClose={onClose}
-          saveLabel="Create camp"
-          saveIcon="add_circle"
+          saveLabel={editing ? 'Save changes' : 'Create camp'}
+          saveIcon={editing ? 'check' : 'add_circle'}
           saving={saving}
           formError={formError}
         />

@@ -74,6 +74,42 @@ class CampCreateIn(BaseModel):
         return self
 
 
+class CampEditIn(BaseModel):
+    title: str = Field(min_length=3, max_length=150)
+    camp_date: date
+    start_time: str = Field(pattern=TIME)
+    end_time: str = Field(pattern=TIME)
+    venue: str = Field(min_length=3, max_length=200)
+    target_units: int = Field(ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def check(self):
+        if self.end_time <= self.start_time:
+            raise ValueError("The end time must be after the start time.")
+        return self
+
+
+class CampCancelIn(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=150)
+
+
+class CampAttendanceIn(BaseModel):
+    donor_id: int
+    status: Literal["donated", "deferred"]
+    note: Optional[str] = Field(default=None, max_length=200)
+
+
+class RequestEditIn(BaseModel):
+    urgency: Optional[Urgency] = None
+    required_by: Optional[datetime] = None
+    notes: Optional[str] = Field(default=None, max_length=300)
+
+
+class FulfillIn(BaseModel):
+    # Units to take out of stock for this request (0 = just close it)
+    issue_units: int = Field(default=0, ge=0, le=50)
+
+
 # ---------------- Donor ----------------
 
 

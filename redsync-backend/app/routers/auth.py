@@ -1,4 +1,5 @@
 import hmac
+import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,6 +18,10 @@ from app.security import (
     hash_password,
     verify_password,
 )
+
+from app.sms import SmsError, send_otp_sms, shows_otp_in_response
+
+log = logging.getLogger("redsync.auth")
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -43,15 +48,24 @@ def _send_otp(db: Session, phone: str, purpose: str) -> str:
         raise HTTPException(429, "Too many OTP requests. Please wait a few minutes and try again.")
 
     otp = generate_otp()
-    db.add(
-        OtpCode(
-            phone=phone,
-            code_hash=hash_otp(phone, otp),
-            purpose=purpose,
-            expires_at=utcnow() + timedelta(minutes=settings.otp_minutes),
-        )
+    row = OtpCode(
+        phone=phone,
+        code_hash=hash_otp(phone, otp),
+        purpose=purpose,
+        expires_at=utcnow() + timedelta(minutes=settings.otp_minutes),
     )
+    db.add(row)
     db.commit()
+
+    try:
+        send_otp_sms(phone, otp)
+    except SmsError as err:
+        # Nothing reached the phone, so remove the code. It must not count towards the
+        # "5 codes in 10 minutes" limit, and nobody can use a code they never received.
+        log.error("OTP SMS to ...%s failed: %s", phone[-4:], err)
+        db.delete(row)
+        db.commit()
+        raise HTTPException(503, "We could not send the OTP right now. Please try again in a minute.")
     return otp
 
 
@@ -102,7 +116,7 @@ def send_otp(body: schemas.OtpRequestIn, db: Session = Depends(get_db)):
     otp = _send_otp(db, phone, body.purpose)
     return {
         "message": "OTP sent successfully.",
-        "dev_otp": otp if settings.dev_mode else None,
+        "dev_otp": otp if shows_otp_in_response() else None,
     }
 
 
@@ -166,6 +180,7 @@ def donor_register(body: schemas.DonorRegisterIn, db: Session = Depends(get_db))
 def donor_login(body: schemas.DonorLoginIn, db: Session = Depends(get_db)):
     phone = _normalize_phone(body.phone)
     _validate_otp(db, phone, body.otp, "login")
+    db.commit()  # saves "used", so the same OTP cannot log in twice
 
     user = db.scalar(select(User).where(User.phone == phone, User.role == "donor"))
     if user is None or not user.is_active:
@@ -234,8 +249,58 @@ def hospital_login(body: schemas.HospitalLoginIn, db: Session = Depends(get_db))
         raise HTTPException(401, "Incorrect email or password.")
     if not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "Incorrect email or password.")
-    if user.hospital.facility_code != body.facility_code.strip():
-        raise HTTPException(401, "Incorrect facility code.")
+    # Check approval first: a pending hospital has no facility code yet, so it cannot know one
     if user.hospital.status != "approved":
         raise HTTPException(403, "Your hospital account is not approved yet.")
+    if user.hospital.facility_code != body.facility_code.strip():
+        raise HTTPException(401, "Incorrect facility code.")
     return _token_response(user)
+
+
+# ---------------- forgot password (hospitals) ----------------
+
+RESET_PURPOSE = "hosp_reset"
+
+
+def _hospital_for_reset(db: Session, facility_code: str, email: str):
+    """The staff user whose facility code and email both match, or None."""
+    user = db.scalar(select(User).where(User.email == email.lower().strip(), User.role == "hospital"))
+    if user is None or not user.is_active or not user.hospital:
+        return None
+    if user.hospital.facility_code != facility_code.strip():
+        return None
+    return user
+
+
+@router.post("/hospital/forgot-password", response_model=schemas.OtpOut)
+def hospital_forgot_password(body: schemas.HospitalForgotIn, db: Session = Depends(get_db)):
+    """Sends a reset OTP to the mobile number the hospital registered with.
+
+    The reply is the same whether or not the details matched, so nobody can use this
+    to find out which facility codes or emails exist.
+    """
+    message = (
+        "If these details match a hospital account, an OTP has been sent to its "
+        "registered contact mobile number."
+    )
+    user = _hospital_for_reset(db, body.facility_code, body.email)
+    if user is None:
+        return {"message": message, "dev_otp": None}
+
+    phone = "".join(ch for ch in user.hospital.contact_mobile if ch.isdigit())[-10:]
+    otp = _send_otp(db, phone, RESET_PURPOSE)
+    return {"message": message, "dev_otp": otp if shows_otp_in_response() else None}
+
+
+@router.post("/hospital/reset-password")
+def hospital_reset_password(body: schemas.HospitalResetIn, db: Session = Depends(get_db)):
+    user = _hospital_for_reset(db, body.facility_code, body.email)
+    if user is None:
+        # Same wording as an expired code, so this does not reveal whether the account exists
+        raise HTTPException(401, "This OTP has expired or was not requested. Please request a new one.")
+
+    phone = "".join(ch for ch in user.hospital.contact_mobile if ch.isdigit())[-10:]
+    _validate_otp(db, phone, body.otp, RESET_PURPOSE)
+    user.password_hash = hash_password(body.new_password)
+    db.commit()
+    return {"message": "Your password has been changed. You can now sign in."}

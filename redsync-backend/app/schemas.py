@@ -181,6 +181,25 @@ class HospitalLoginIn(BaseModel):
     password: str = Field(min_length=1, max_length=64)
 
 
+class HospitalForgotIn(BaseModel):
+    facility_code: str = Field(min_length=1, max_length=20)
+    email: EmailStr
+
+
+class HospitalResetIn(BaseModel):
+    facility_code: str = Field(min_length=1, max_length=20)
+    email: EmailStr
+    otp: str = Field(pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=8, max_length=64)
+
+    @field_validator("new_password")
+    @classmethod
+    def check_password(cls, value: str) -> str:
+        if not re.search(r"[A-Za-z]", value) or not re.search(r"\d", value):
+            raise ValueError("Use letters and numbers in your password.")
+        return value
+
+
 # ---------------- Responses ----------------
 
 
